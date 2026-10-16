@@ -2,58 +2,64 @@
 
 ## 專案目的
 
-此專案是簡單的 LINE 文字聊天機器人，以 Docker Compose 執行 n8n，透過雲端語言模型產生回覆。
+此專案是以 Render Web Service 部署的簡易 LINE 文字聊天機器人，使用 Python/FastAPI 接收 webhook，呼叫 Gemini 產生回答，再透過 LINE Reply API 回覆。Docker Compose 用於本機開發。此路線暫不使用 n8n。
 
-- 每則使用者文字訊息獨立處理，不保存或傳送先前的對話內容。
-- 貼圖、圖片、音訊及其他非文字訊息不回覆。
-- 在 webhook 工作流程中驗證 LINE 簽章，再處理事件。
-
-目前 `spec.txt` 為空；以上需求來自使用者在對話中提供的規格。若新增或更改需求，先更新 README.md 與工作流程設計，再開始實作。
+- 每則訊息獨立處理，不保存或傳送先前對話內容。
+- 只回覆文字事件；貼圖、圖片、音訊及其他非文字事件不回覆。
+- 必須以原始 request body 和 `x-line-signature` 驗證 LINE 簽章。
+- 使用者需求變更時，先更新 README.md 與 plan.md，再實作。
 
 ## 專案結構
 
-- `compose.yaml`：n8n 與 webhook-gateway (Caddy) 的本機服務設定。n8n 編輯器只綁定 `127.0.0.1:5678`；閘道只公開 webhook 路徑。
-- `Caddyfile`：將 `/webhook/*` 與 `/webhook-test/*` 轉送至 n8n，其他路徑回傳 404。
-- `.env.example`：環境變數範本。複製為 `.env` 後填入本機設定。
-- `.env`：本機秘密與 URL 設定，已列入 `.gitignore`，禁止提交、記錄到日誌或貼入對話。
-- `README.md`：啟動、設定與操作說明。
-- `spec.txt`：功能規格檔；目前尚未填入內容。
+- `app/main.py`：FastAPI health endpoint、簽章驗證、事件篩選、快速 ACK 與短期事件去重。
+- `app/providers.py`：Gemini 與 LINE Reply API 客戶端。
+- `tests/test_webhook.py`：Python 標準函式庫 unittest，使用合成 payload 驗證核心行為。
+- `Dockerfile`、`requirements.txt`：Render 與本機共用建置設定。
+- `compose.yaml`：Windows Docker Desktop 本機服務與 `test` profile，僅將 `127.0.0.1:10000` 開放給本機。
+- `.dockerignore`：避免將本機設定、Git 資料與快取送入 Docker build context。
+- `render.yaml`：Render Blueprint，秘密使用 `sync: false`，不得加入真實值。
+- `.env.example`：本機環境變數範本。
+- `.env`：本機秘密，已加入 `.gitignore`；禁止讀取、提交、寫入日誌或貼入對話，除非使用者明確要求處理其內容。
+- `README.md`：建置、部署及操作說明。
+- `plan.md`、`hackmd-slides.md`：系統設計、兩階段測試計畫與簡報。
+- `spec.txt`：功能規格檔；未填內容時以使用者在對話明確提供的規格為準。
 
 ## 開發與操作
 
-1. Windows 使用 PowerShell，於專案根目錄執行 Docker Compose 命令。
-2. 首次啟動前，將 `.env.example` 複製成 `.env`，並以安全的隨機值設定 `N8N_ENCRYPTION_KEY`。
-3. 使用 `docker compose up -d` 啟動，透過 `http://localhost:5678` 操作 n8n；用 `docker compose logs -f n8n` 檢視服務日誌。
-4. Tailscale Funnel 應指向本機 webhook 閘道連接埠 `8080`。不可將 n8n 編輯器的 `5678` 連接埠公開至網際網路。
-5. LINE 與模型金鑰存放在 n8n Credentials 或未提交的本機 `.env`。不得把秘密寫進 workflow 匯出檔、README、範例或版本控制。
-6. 每次使用者訊息只傳給模型當下的文字，不附加歷史訊息，也不新增持久化的聊天紀錄或記憶。
-7. LINE webhook 必須以原始 request body 和 `x-line-signature` 驗證簽章；簽章無效時不得呼叫模型或回覆。只處理 `message.type === "text"` 的事件。
-8. 變更 Compose 或 Caddy 設定時，維持 n8n 編輯器僅本機可連線，以及 Caddy 僅轉送 webhook 路徑的界線。
+1. Windows 使用 PowerShell，於專案根目錄執行 Docker Compose。
+2. 本機將 `.env.example` 複製/合併為 `.env`，填入 LINE Channel Secret、LINE Channel Access Token 與 Gemini API Key；範例佔位值不可直接用於實際呼叫。
+3. `docker compose up --build` 啟動本機服務；健康端點為 `http://localhost:10000/healthz`。
+4. Render 從 GitHub repository 以 Dockerfile 建置，服務監聽 `0.0.0.0:$PORT`。秘密只在 Render Dashboard 的 Environment 設定。
+5. GitHub repository secret 不會自動傳入 Render。禁止將真實秘密放在原始碼、`render.yaml`、Dockerfile、README、測試資料或 workflow。
+6. 每次模型請求只包含當則文字與固定系統指示，不保存對話歷史或訊息本文。
+7. Webhook 必須先驗證 HMAC-SHA256 簽章；只排入文字事件。先回 2xx ACK，再於背景處理模型和 LINE 回覆。
+8. 日誌限非敏感錯誤類別，不得記錄訊息本文、prompt、模型輸出、完整 provider error、token 或 API key。
+9. Render Free 閒置休眠及冷啟動風險須在文件與驗收中說清楚；不得宣稱為穩定即時服務。
 
 ## 測試與驗證
 
-使用者要求的驗證分兩階段進行；尚未完成的階段要明確標示為待測，不得宣稱已通過。
+使用者要求兩階段測試；未執行的項目需標為待測，不能宣稱通過。
 
 ### 第一階段：本機整合
 
-- 確認容器啟動，n8n 本機健康端點回應成功。
-- 確認 Caddy 對根路徑回傳 404，只轉送 webhook 路徑。
-- 用測試 webhook 確認有效 LINE 簽章的文字訊息會呼叫模型並回覆。
-- 確認貼圖及其他非文字事件不呼叫模型、不回覆；無效簽章也會被拒絕。
-- 確認連續文字訊息彼此獨立，工作流程未傳入或保存前一則訊息。
+- Compose 容器啟動，`/healthz` 回 200。
+- 用合成原始 body 確認有效簽章可 ACK；無效簽章遭拒且不呼叫模型/LINE。
+- 文字事件排入背景處理；非文字事件不回覆。
+- 重複 `webhookEventId` 不重複處理；不同訊息不共用對話內容。
+- 日誌不包含內容或秘密。
 
-### 第二階段：LINE 實測
+### 第二階段：Render/LINE 實測
 
-- 在 LINE Developers Console 設定 Funnel HTTPS 下的 n8n production webhook URL，並使用 Verify 確認可連線。
-- 以少量測試帳號傳送數則互不相關的文字訊息，以及貼圖、圖片或音訊。
-- 確認只有文字事件得到回覆，回覆不依賴先前對話；檢查 n8n 執行紀錄、錯誤與模型用量。
+- Render 部署完成，Dashboard Secret 設定完成，`/healthz` 可連線。
+- LINE Developers Console Verify 成功，測試文字與非文字訊息。
+- 檢查模型用量、錯誤與 LINE webhook timeout/redelivery，尤其觀察 Render Free 冷啟動。
 
-沒有可執行的自動化測試套件時，不要新增測試框架或虛報自動化測試結果。變更完成後只執行與使用者要求相符的驗證。
+沒有現成自動測試套件時，不新增大型測試框架；只執行與需求相符的最小驗證。
 
 ## 貢獻規則
 
-- 優先維持簡單流程；新增依賴、服務、儲存或對話記憶前，需有明確規格依據。
-- 保持 Compose 設定可在 Windows Docker Desktop 使用，持久化 n8n 資料至 named volume。
-- 變更環境變數時同步更新 `.env.example` 與 README.md，但範例值不得包含真實秘密。
-- 不提交 `.env`、憑證、LINE 使用者內容、執行紀錄或含敏感資料的 workflow 匯出。
-- 完成修改時，摘要說明變更、驗證方式及仍待使用者設定的項目。
+- 優先維持簡單，不新增資料庫、持久記憶、服務或依賴，除非有明確需求。
+- 修改環境變數時同步更新 `.env.example`、README.md 與 plan.md；範例不得含真實秘密。
+- 不修改或讀取 `.env` 以外的使用者秘密，不提交 `.env`、憑證、訊息內容、執行記錄或敏感匯出檔。
+- 保持 Docker Compose 可在 Windows Docker Desktop 執行；不將本機服務綁定至所有網路介面。
+- 完成時摘要變更、實際驗證及待使用者設定項目。

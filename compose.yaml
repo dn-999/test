@@ -1,28 +1,18 @@
 services:
-  n8n:
-    image: n8nio/n8n:latest
+  line-chatbot:
+    build: .
     restart: unless-stopped
-    ports:
-      - "127.0.0.1:5678:5678"
     environment:
-      TZ: Asia/Taipei
-      GENERIC_TIMEZONE: Asia/Taipei
-      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:?Set N8N_ENCRYPTION_KEY in .env}
-      N8N_EDITOR_BASE_URL: ${N8N_EDITOR_BASE_URL:-http://localhost:5678/}
-      N8N_WEBHOOK_URL: ${N8N_WEBHOOK_URL:-http://localhost:8080/}
-      N8N_PROXY_HOPS: "1"
-    volumes:
-      - n8n_data:/home/node/.n8n
-
-  webhook-gateway:
-    image: caddy:2
-    restart: unless-stopped
+      PORT: "10000"
+      LINE_CHANNEL_SECRET: ${LINE_CHANNEL_SECRET:-}
+      LINE_CHANNEL_ACCESS_TOKEN: ${LINE_CHANNEL_ACCESS_TOKEN:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.1-flash-lite}
     ports:
-      - "127.0.0.1:8080:8080"
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-    depends_on:
-      - n8n
+      - "127.0.0.1:10000:10000"
 
-volumes:
-  n8n_data:
+  unit-tests:
+    build:
+      context: .
+      target: testing
+    profiles: ["test"]
