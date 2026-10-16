@@ -1,0 +1,7 @@
+:8080 {
+  @n8n_webhooks path /webhook/* /webhook-test/*
+  handle @n8n_webhooks {
+    reverse_proxy n8n:5678
+  }
+  respond 404
+}
